@@ -82,21 +82,47 @@ def test_short_values_are_untouched():
     assert e.output == "small"
 
 
+# The formats a tool call actually logs. An earlier redactor scanned for the
+# first delimiter after the key, so a space ended the match before the value
+# started -- it masked the key and printed the secret anyway. These cases exist
+# because a demo caught that, and the old test did not: it only ever exercised
+# key=value, the one shape that happened to work.
 @pytest.mark.parametrize(
-    "secret",
+    ("payload", "secret"),
     [
-        pytest.param("password=hunter2", id="password"),
-        pytest.param("api_key=sk-abc123", id="api-key"),
-        pytest.param("token=eyJhbGci", id="token"),
+        pytest.param('password=hunter2', "hunter2", id="form-encoded"),
+        pytest.param('{"password": "hunter2"}', "hunter2", id="json-spaced"),
+        pytest.param('{"api_key":"sk-abc123"}', "sk-abc123", id="json-tight"),
+        pytest.param('Authorization: Bearer sk-live-1', "sk-live-1", id="bearer-header"),
+        pytest.param('SECRET = s3cr3t; next', "s3cr3t", id="spaced-equals"),
+        pytest.param("{'token': 'eyJhbGci'}", "eyJhbGci", id="single-quoted"),
     ],
 )
-def test_secrets_are_redacted_at_the_tracer(secret):
+def test_secrets_never_reach_the_trace(payload, secret):
     """Redact here, not at the sink -- sinks get misconfigured."""
-    e = Tracer().record(1, EventType.TOOL_CALL, name="login", input=secret)
+    e = Tracer().record(1, EventType.TOOL_CALL, name="login", input=payload)
     assert "REDACTED" in e.input
+    assert secret not in e.input, f"secret leaked: {e.input}"
+
+
+def test_redaction_keeps_the_fields_around_the_secret():
+    """Over-redacting makes a trace useless for debugging."""
+    e = Tracer().record(
+        1, EventType.TOOL_CALL, name="login",
+        input='{"user": "rav", "password": "hunter2", "attempt": 3}',
+    )
     assert "hunter2" not in e.input
-    assert "sk-abc123" not in e.input
-    assert "eyJhbGci" not in e.input
+    assert "rav" in e.input          # who was it
+    assert "attempt" in e.input      # and what were they doing
+
+
+def test_a_word_containing_a_secret_key_is_not_mangled():
+    """`my_password_hash` as a column name is not a credential."""
+    e = Tracer().record(
+        1, EventType.TOOL_CALL, name="query",
+        input="SELECT my_password_hash FROM users",
+    )
+    assert "REDACTED" not in e.input
 
 
 # ── replay: F8 ───────────────────────────────────────────────────────────────

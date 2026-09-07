@@ -6,6 +6,7 @@ nothing about which of nineteen tool calls was the wrong one.
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -114,17 +115,28 @@ class Tracer:
 
 
 def _redact(text: str) -> str:
-    """Redact at the tracer, not at the sink -- sinks get misconfigured."""
-    lowered = text.lower()
-    for key in _REDACT_KEYS:
-        start = 0
-        while (found := lowered.find(key, start)) != -1:
-            tail = text[found + len(key):]
-            cut = min(
-                (i for i in (tail.find(c) for c in (",", "}", "\n", " ")) if i > 0),
-                default=len(tail),
-            )
-            text = text[:found + len(key)] + "=[REDACTED]" + tail[cut:]
-            lowered = text.lower()
-            start = found + len(key) + 11
-    return text
+    """Redact at the tracer, not at the sink -- sinks get misconfigured.
+
+    Handles the shapes a tool call actually logs:
+
+        {"password": "hunter2"}     JSON, space after the colon
+        password=hunter2            form encoding
+        Authorization: Bearer xyz   a header, value runs to end of line
+
+    An earlier version scanned for the first delimiter after the key, which
+    meant a space terminated the match before the value began -- so the key was
+    masked and the secret printed anyway. Anything matching a secret key now
+    consumes the whole value.
+    """
+    def mask(match: re.Match) -> str:
+        return f"{match.group('key')}{match.group('sep')}[REDACTED]"
+
+    pattern = re.compile(
+        # The key, optionally closed by the quote of a JSON field name.
+        r"(?P<key>(?:" + "|".join(_REDACT_KEYS) + r")[\"']?)"
+        r"(?P<sep>\s*[:=]\s*)"
+        # The value: a quoted string, or a bare run up to the next delimiter.
+        r"(?P<value>\"[^\"]*\"|'[^']*'|[^,;}\n]+)",
+        re.IGNORECASE,
+    )
+    return pattern.sub(mask, text)
