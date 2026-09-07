@@ -115,7 +115,7 @@ class ToolRegistry:
 
         try:
             self._validate(tool, arguments)
-            return str(tool.fn(**arguments))
+            result = str(tool.fn(**arguments))
         except ToolError as err:
             return self._maybe_loop_guard(err)
         except TypeError as exc:
@@ -130,6 +130,12 @@ class ToolRegistry:
                 problem=f"{type(exc).__name__}: {exc}",
                 kind=ErrorKind.TERMINAL,
             ).as_message()
+        else:
+            # Success breaks the streak: the model is making progress again.
+            self._error_counts = {
+                k: v for k, v in self._error_counts.items() if k[0] != name
+            }
+            return result
 
     def _validate(self, tool: Tool, arguments: dict[str, Any]) -> None:
         schema = tool.schema()
@@ -180,13 +186,21 @@ class ToolRegistry:
                     )
 
     def _maybe_loop_guard(self, err: ToolError) -> str:
-        """The same error three times is a loop, not a retry."""
+        """The same error `repeat_limit` times running is a loop, not a retry.
+
+        The count is per (tool, problem) and is cleared by any successful call
+        to that tool -- see `execute`. Without that reset the counter would
+        accumulate across unrelated parts of a long run and trip early on a
+        model that had actually recovered in between.
+        """
         key = (err.tool, err.problem)
-        self._error_counts[key] = self._error_counts.get(key, 0) + 1
-        if self._error_counts[key] >= self.repeat_limit:
+        count = self._error_counts.get(key, 0) + 1
+        self._error_counts[key] = count
+
+        if count >= self.repeat_limit:
             return (
                 f"Error in {err.tool}: {err.problem}. This has now failed "
-                f"{self._error_counts[key]} times with the same problem. Stop "
-                "calling this tool and explain the situation to the user."
+                f"{count} times in a row with the same problem. Stop calling "
+                "this tool and explain the situation to the user."
             )
         return err.as_message()

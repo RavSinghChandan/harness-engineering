@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 
-from minihar import Param, ToolRegistry
+from minihar import Param, ToolError, ToolRegistry
 
 
 def orders_registry() -> ToolRegistry:
@@ -168,3 +168,70 @@ def test_a_raising_tool_does_not_escape():
     out = reg.execute("explode", {"x": "hi"})
     assert "RuntimeError: boom" in out
     assert "Do not retry" in out
+
+
+# --- the loop guard --------------------------------------------------------
+#
+# The same error repeating means the model is not learning from it. These tests
+# were added after a demo showed the counter tripping early and reporting an
+# inflated count, because it accumulated across the whole registry lifetime
+# rather than counting a consecutive streak.
+
+
+def flaky_registry(repeat_limit: int = 3) -> ToolRegistry:
+    """A registry whose tool fails on a bad id and succeeds on a good one."""
+    reg = ToolRegistry(repeat_limit=repeat_limit)
+
+    def get_order(order_id: str) -> str:
+        """Fetch one order."""
+        if not order_id.startswith("ORD-"):
+            raise ToolError(
+                tool="get_order", problem="malformed order id", received=order_id
+            )
+        return f"{order_id}: ok"
+
+    reg.register(get_order, order_id=Param("Order id like ORD-1234"))
+    return reg
+
+
+def test_loop_guard_stays_quiet_below_the_limit():
+    reg = flaky_registry(repeat_limit=3)
+    for _ in range(2):
+        assert "failed" not in reg.execute("get_order", {"order_id": "bad"})
+
+
+def test_loop_guard_fires_exactly_on_the_limit():
+    reg = flaky_registry(repeat_limit=3)
+    messages = [reg.execute("get_order", {"order_id": "bad"}) for _ in range(3)]
+
+    assert "failed" not in messages[0]
+    assert "failed" not in messages[1]
+    assert "3 times in a row" in messages[2]
+    assert "Stop calling this tool" in messages[2]
+
+
+def test_loop_guard_counts_the_streak_not_the_lifetime():
+    """A success in between resets the count -- the model recovered."""
+    reg = flaky_registry(repeat_limit=3)
+
+    reg.execute("get_order", {"order_id": "bad"})       # streak 1
+    reg.execute("get_order", {"order_id": "bad"})       # streak 2
+    reg.execute("get_order", {"order_id": "ORD-1"})     # success: streak cleared
+
+    # Without the reset this next call would be the 3rd failure and would trip.
+    assert "failed" not in reg.execute("get_order", {"order_id": "bad"})
+
+
+def test_loop_guard_is_per_problem_not_per_tool():
+    """Two different problems on one tool are not one loop."""
+    reg = ToolRegistry(repeat_limit=2)
+
+    def check(mode: str) -> str:
+        """Fails differently depending on mode."""
+        raise ToolError(tool="check", problem=f"problem-{mode}")
+
+    reg.register(check, mode=Param("Which failure to raise"))
+
+    assert "failed" not in reg.execute("check", {"mode": "a"})
+    assert "failed" not in reg.execute("check", {"mode": "b"})   # different problem
+    assert "2 times in a row" in reg.execute("check", {"mode": "a"})
