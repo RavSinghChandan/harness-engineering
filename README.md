@@ -144,8 +144,13 @@ model — a harness is ordinary control-flow code and deserves fast deterministi
 tests.
 
 ```bash
-cd projects/p01-minimal-loop && python -m pytest tests/ -q
+./run-all-tests.sh                                    # every project
+
+cd projects/p01-minimal-loop && python -m pytest -q   # just one
 ```
+
+Each project is self-contained, with its package at the project root, so run
+pytest from inside the project directory rather than from the repo root.
 
 ---
 

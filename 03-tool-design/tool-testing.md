@@ -193,4 +193,4 @@ one shared function applied to every tool, not copied per tool.
 3. Why assert on tool choice rather than answer text?
 4. Why prefer a fake over a mock here?
 
-→ Next: [`../04-context-engineering/context-window-budgeting.md`](../04-context-engineering/context-window-budgeting.md)
+→ Next: [`../04-context-and-memory/context-assembly.md`](../04-context-and-memory/context-assembly.md)
