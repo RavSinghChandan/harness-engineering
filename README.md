@@ -128,18 +128,24 @@ harness-engineering/
 Each project is a **working Python package** that adds one layer. By P08 they
 compose into `minihar`, a small but complete harness you could actually ship.
 
-| # | Project | Adds | You will have built |
+| # | Project | Adds | Tests |
 |---|---|---|---|
-| 01 | Minimal loop | The turn cycle | An agent that calls tools until done |
-| 02 | Tool registry | Schemas, validation, errors | Tools that are hard to call wrong |
-| 03 | Context manager | Budgets, compaction | A run that never blows the window |
-| 04 | Permission layer | Policy, confirmation | An agent that asks before it deletes |
-| 05 | Observability | Traces, metrics, replay | A run you can debug after the fact |
-| 06 | Subagents | Delegation, isolation | A supervisor that farms out work |
-| 07 | Durable runs | Persistence, resumption | A run that survives a restart |
-| 08 | Capstone | All of it, wired together | `minihar` — your own harness |
+| 01 | Minimal loop | The turn cycle, budgets, termination | 13 |
+| 02 | Tool registry | Schemas from code, validation, teaching errors | 18 |
+| 03 | Context manager | Token budgets, assembly, compaction | 18 |
+| 04 | Permission layer | Effect-based policy, injection containment | 18 |
+| 05 | Observability | Traces, cost attribution, offline replay | 17 |
+| 06 | Subagents | Delegation contracts, capped fan-out | 14 |
+| 07 | Durable runs | Checkpoints, idempotent side effects | 16 |
+| 08 | Capstone | All of it, wired together | 16 |
 
-Every project ships with tests. Read the theory, build the layer, run the tests.
+**130 tests, all passing, no API key required.** Tests drive a scripted fake
+model — a harness is ordinary control-flow code and deserves fast deterministic
+tests.
+
+```bash
+cd projects/p01-minimal-loop && python -m pytest tests/ -q
+```
 
 ---
 
